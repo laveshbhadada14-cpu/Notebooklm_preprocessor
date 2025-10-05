@@ -165,7 +165,7 @@ def convert_spreadsheet_to_pdf(file_path):
 # ==============================================================================
 
 st.set_page_config(layout="wide")
-st.title(" универсальный препроцессор контента 🤖")
+st.title(" Universal Content Preprocessor 🤖")
 st.write("Upload any supported file to convert or process it for AI analysis.")
 
 uploaded_file = st.file_uploader("Choose a file to begin...")
@@ -312,4 +312,5 @@ if uploaded_file is not None:
 
     # Clean up the original uploaded file
     if os.path.exists(filename):
+
         os.remove(filename)
