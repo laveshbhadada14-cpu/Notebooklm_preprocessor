@@ -1,0 +1,13 @@
+streamlit
+pypandoc
+ebooklib
+pdfkit
+beautifulsoup4
+PyMuPDF
+pytesseract
+pdf2image
+camelot-py[cv]
+Pillow
+python-pptx
+pandas
+openpyxl
