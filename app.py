@@ -13,12 +13,12 @@ from PIL import Image
 from bs4 import BeautifulSoup
 from ebooklib import epub, ITEM_DOCUMENT
 import pypandoc
+import shutil # New import for the health check
 
 # ==============================================================================
 # PART 1: ALL HELPER & PROCESSING FUNCTIONS
 # ==============================================================================
-# (These functions remain the same as before)
-
+# (All your helper functions like create_safe_filename, ocr_to_searchable_pdf, etc. go here. They remain unchanged.)
 # --- UTILITY: Creates safe filenames ---
 def create_safe_filename(text, max_length=50):
     text = text[:max_length]
@@ -159,7 +159,7 @@ def convert_spreadsheet_to_pdf(file_path):
     except Exception as e:
         st.error(f"❌ Spreadsheet conversion failed: {e}")
         return None
-
+        
 # ==============================================================================
 # PART 2: STREAMLIT USER INTERFACE
 # ==============================================================================
@@ -167,6 +167,20 @@ def convert_spreadsheet_to_pdf(file_path):
 st.set_page_config(layout="wide")
 st.title("Universal Content Preprocessor 🤖")
 st.write("Upload any supported file to convert or process it for AI analysis.")
+
+# --- NEW: System Health Check ---
+with st.expander("System Status"):
+    st.write("Checking for required system-level programs...")
+    dependencies = ["tesseract", "pdftoppm", "gs", "wkhtmltopdf"]
+    all_found = True
+    for dep in dependencies:
+        if shutil.which(dep):
+            st.success(f"✅ {dep} is installed.")
+        else:
+            st.error(f"❌ {dep} is NOT installed. Some features may fail.")
+            all_found = False
+    if all_found:
+        st.info("All system dependencies are installed correctly.")
 
 uploaded_file = st.file_uploader("Choose a file to begin...")
 
@@ -177,19 +191,17 @@ if uploaded_file is not None:
     temp_file_path = f"temp_file{ext}"
     with open(temp_file_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
-    # --- All subsequent functions will now use 'temp_file_path' ---
     
+    # (The rest of the workflow logic remains the same)
     # --- WORKFLOW 1: Simple Files (DOCX, MD, TXT) ---
     if ext.lower() in ['.docx', '.md', '.txt']:
         st.subheader("Convert Document")
         chosen_format = st.radio("Convert to:", ('PDF', 'TXT'), horizontal=True)
-        
         if st.button("Convert and Download"):
             with st.spinner(f"Converting to {chosen_format}..."):
                 pandoc_format = 'plain' if chosen_format == 'TXT' else 'pdf'
                 output_filename = f"{base_name}.{chosen_format.lower()}"
                 pypandoc.convert_file(temp_file_path, pandoc_format, outputfile=output_filename, extra_args=['--pdf-engine=wkhtmltopdf'])
-                
                 with open(output_filename, "rb") as f:
                     st.download_button(f"Download {os.path.basename(output_filename)}", f, file_name=os.path.basename(output_filename))
                 os.remove(output_filename) # Clean up
@@ -204,7 +216,6 @@ if uploaded_file is not None:
                     with open(output_file, "rb") as f:
                         st.download_button("Download .txt", f, file_name=f"{base_name}.txt")
                     os.remove(output_file)
-
     elif ext.lower() in ['.xlsx', '.xls', '.csv']:
         st.subheader("Process Spreadsheet")
         if st.button("Convert to PDF and Download"):
@@ -218,7 +229,6 @@ if uploaded_file is not None:
     # --- WORKFLOW 3: Advanced PDF Options ---
     elif ext.lower() == '.pdf':
         st.subheader("Advanced PDF Processing")
-        
         doc = fitz.open(temp_file_path)
         headings, last_heading_title = [], ""
         heading_pattern = r'^(Chapter\s+\d+.*|Section\s+\d+.*)'
@@ -232,7 +242,6 @@ if uploaded_file is not None:
                     last_heading_title = current_heading_title
                     break 
         doc.close()
-        
         col1, col2 = st.columns(2)
         with col1:
             st.write("Extraction Options:")
@@ -240,7 +249,6 @@ if uploaded_file is not None:
             table_check = st.checkbox("Extract Tables into CSVs", value=True)
             image_check = st.checkbox("Extract Images", value=True)
             clean_check = st.checkbox("Clean Headers & Footers", value=False)
-        
         with col2:
             st.write("Splitting Options:")
             smart_split_check = st.checkbox("Smart Split by Chapter/Section", value=True)
@@ -249,7 +257,6 @@ if uploaded_file is not None:
             else:
                 st.info("No 'Chapter X' or 'Section X' headings found for smart splitting.")
                 selected_split_value = 1
-
         if st.button("Process PDF"):
             with st.spinner("Processing PDF with selected options..."):
                 all_files = []
@@ -257,60 +264,12 @@ if uploaded_file is not None:
                 if table_check: all_files.extend(extract_tables_from_pdf(temp_file_path))
                 if image_check: all_files.extend(extract_images_from_pdf(temp_file_path))
                 if smart_split_check:
-                    if not headings:
-                        st.warning("Smart Split selected, but no headings were found.")
-                    else:
-                        all_files.extend(smart_split_pdf_by_headings(temp_file_path, headings, selected_split_value))
+                    if not headings: st.warning("Smart Split selected, but no headings were found.")
+                    else: all_files.extend(smart_split_pdf_by_headings(temp_file_path, headings, selected_split_value))
                 if clean_check: all_files.append(clean_headers_and_footers(temp_file_path))
-                
-                if not all_files:
-                    st.warning("No actions were selected or no files were generated.")
+                if not all_files: st.warning("No actions were selected or no files were generated.")
                 else:
                     zip_filename = f"{base_name}_processed.zip"
                     with zipfile.ZipFile(zip_filename, 'w') as zipf:
                         for f in all_files:
-                            if os.path.exists(f): zipf.write(f); os.remove(f)
-                    
-                    with open(zip_filename, "rb") as f:
-                        st.download_button(f"Download Results ({os.path.basename(zip_filename)})", f, file_name=zip_filename)
-                    os.remove(zip_filename)
-
-    # --- WORKFLOW 4: EPUB Splitting ---
-    elif ext.lower() == '.epub':
-        st.subheader("Split EPUB")
-        book = epub.read_epub(temp_file_path)
-        items = list(book.get_items_of_type(ITEM_DOCUMENT))
-        chapters = [BeautifulSoup(item.get_content(), 'html.parser').get_text().strip() for item in items if item]
-        total_chapters = len(chapters)
-        
-        selected_split_value = st.slider("Group Chapters by:", min_value=1, max_value=total_chapters, value=1)
-        
-        if st.button("Split EPUB to PDFs"):
-            with st.spinner(f"Splitting EPUB into chunks of {selected_split_value} chapters..."):
-                split_files = []
-                total_splits = (total_chapters + selected_split_value - 1) // selected_split_value
-                for i in range(total_splits):
-                    start_idx, end_idx = i * selected_split_value, min((i + 1) * selected_split_value, total_chapters)
-                    split_chapters = chapters[start_idx:end_idx]
-                    first_chapter_content = split_chapters[0]
-                    chapter_title = "Untitled_Chapter"
-                    for line in first_chapter_content.split('\n')[:10]:
-                        line = line.strip()
-                        if 0 < len(line) < 70: chapter_title = line; break
-                    safe_title = create_safe_filename(chapter_title)
-                    output_pdf = f"Part_{i+1}_{safe_title}.pdf"
-                    html_content = "".join([f"<h1>Chapter {j+1}</h1><p>{chap}</p>" for j, chap in enumerate(split_chapters, start=start_idx)])
-                    pdfkit.from_string(html_content, output_pdf, options={"enable-local-file-access": ""})
-                    split_files.append(output_pdf)
-                
-                zip_filename = f"{base_name}_split.zip"
-                with zipfile.ZipFile(zip_filename, 'w') as zipf:
-                    for f in split_files: zipf.write(f); os.remove(f)
-                
-                with open(zip_filename, "rb") as f:
-                    st.download_button(f"Download Results ({os.path.basename(zip_filename)})", f, file_name=zip_filename)
-                os.remove(zip_filename)
-
-    # Clean up the original temporary file
-    if os.path.exists(temp_file_path):
-        os.remove(temp_file_path)
+                            if os.path.exists(f): zip
