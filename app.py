@@ -17,7 +17,7 @@ import pypandoc
 # ==============================================================================
 # PART 1: ALL HELPER & PROCESSING FUNCTIONS
 # ==============================================================================
-# These are the same powerful functions we built in the Colab notebook.
+# (These functions remain the same as before)
 
 # --- UTILITY: Creates safe filenames ---
 def create_safe_filename(text, max_length=50):
@@ -165,29 +165,30 @@ def convert_spreadsheet_to_pdf(file_path):
 # ==============================================================================
 
 st.set_page_config(layout="wide")
-st.title(" Universal Content Preprocessor 🤖")
+st.title("Universal Content Preprocessor 🤖")
 st.write("Upload any supported file to convert or process it for AI analysis.")
 
 uploaded_file = st.file_uploader("Choose a file to begin...")
 
 if uploaded_file is not None:
-    # Save the uploaded file to a temporary location
-    with open(uploaded_file.name, "wb") as f:
+    # --- FIX: Use a safe, temporary file path instead of the original filename ---
+    original_filename = uploaded_file.name
+    base_name, ext = os.path.splitext(original_filename)
+    temp_file_path = f"temp_file{ext}"
+    with open(temp_file_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
+    # --- All subsequent functions will now use 'temp_file_path' ---
     
-    filename = uploaded_file.name
-    base_name, ext = os.path.splitext(filename)
-
     # --- WORKFLOW 1: Simple Files (DOCX, MD, TXT) ---
     if ext.lower() in ['.docx', '.md', '.txt']:
         st.subheader("Convert Document")
         chosen_format = st.radio("Convert to:", ('PDF', 'TXT'), horizontal=True)
         
         if st.button("Convert and Download"):
-            with st.spinner(f"Converting {filename} to {chosen_format}..."):
+            with st.spinner(f"Converting to {chosen_format}..."):
                 pandoc_format = 'plain' if chosen_format == 'TXT' else 'pdf'
                 output_filename = f"{base_name}.{chosen_format.lower()}"
-                pypandoc.convert_file(filename, pandoc_format, outputfile=output_filename, extra_args=['--pdf-engine=wkhtmltopdf'])
+                pypandoc.convert_file(temp_file_path, pandoc_format, outputfile=output_filename, extra_args=['--pdf-engine=wkhtmltopdf'])
                 
                 with open(output_filename, "rb") as f:
                     st.download_button(f"Download {os.path.basename(output_filename)}", f, file_name=os.path.basename(output_filename))
@@ -198,27 +199,27 @@ if uploaded_file is not None:
         st.subheader("Process PowerPoint")
         if st.button("Extract Text and Download"):
             with st.spinner("Extracting text..."):
-                output_file = convert_pptx_to_text(filename)
+                output_file = convert_pptx_to_text(temp_file_path)
                 if output_file:
                     with open(output_file, "rb") as f:
-                        st.download_button("Download .txt", f, file_name=os.path.basename(output_file))
+                        st.download_button("Download .txt", f, file_name=f"{base_name}.txt")
                     os.remove(output_file)
 
     elif ext.lower() in ['.xlsx', '.xls', '.csv']:
         st.subheader("Process Spreadsheet")
         if st.button("Convert to PDF and Download"):
             with st.spinner("Converting to PDF..."):
-                output_file = convert_spreadsheet_to_pdf(filename)
+                output_file = convert_spreadsheet_to_pdf(temp_file_path)
                 if output_file:
                     with open(output_file, "rb") as f:
-                        st.download_button("Download .pdf", f, file_name=os.path.basename(output_file))
+                        st.download_button("Download .pdf", f, file_name=f"{base_name}.pdf")
                     os.remove(output_file)
 
     # --- WORKFLOW 3: Advanced PDF Options ---
     elif ext.lower() == '.pdf':
         st.subheader("Advanced PDF Processing")
         
-        doc = fitz.open(filename)
+        doc = fitz.open(temp_file_path)
         headings, last_heading_title = [], ""
         heading_pattern = r'^(Chapter\s+\d+.*|Section\s+\d+.*)'
         for page in doc:
@@ -252,15 +253,15 @@ if uploaded_file is not None:
         if st.button("Process PDF"):
             with st.spinner("Processing PDF with selected options..."):
                 all_files = []
-                if ocr_check: all_files.append(ocr_to_searchable_pdf(filename))
-                if table_check: all_files.extend(extract_tables_from_pdf(filename))
-                if image_check: all_files.extend(extract_images_from_pdf(filename))
+                if ocr_check: all_files.append(ocr_to_searchable_pdf(temp_file_path))
+                if table_check: all_files.extend(extract_tables_from_pdf(temp_file_path))
+                if image_check: all_files.extend(extract_images_from_pdf(temp_file_path))
                 if smart_split_check:
                     if not headings:
                         st.warning("Smart Split selected, but no headings were found.")
                     else:
-                        all_files.extend(smart_split_pdf_by_headings(filename, headings, selected_split_value))
-                if clean_check: all_files.append(clean_headers_and_footers(filename))
+                        all_files.extend(smart_split_pdf_by_headings(temp_file_path, headings, selected_split_value))
+                if clean_check: all_files.append(clean_headers_and_footers(temp_file_path))
                 
                 if not all_files:
                     st.warning("No actions were selected or no files were generated.")
@@ -277,7 +278,7 @@ if uploaded_file is not None:
     # --- WORKFLOW 4: EPUB Splitting ---
     elif ext.lower() == '.epub':
         st.subheader("Split EPUB")
-        book = epub.read_epub(filename)
+        book = epub.read_epub(temp_file_path)
         items = list(book.get_items_of_type(ITEM_DOCUMENT))
         chapters = [BeautifulSoup(item.get_content(), 'html.parser').get_text().strip() for item in items if item]
         total_chapters = len(chapters)
@@ -310,7 +311,6 @@ if uploaded_file is not None:
                     st.download_button(f"Download Results ({os.path.basename(zip_filename)})", f, file_name=zip_filename)
                 os.remove(zip_filename)
 
-    # Clean up the original uploaded file
-    if os.path.exists(filename):
-
-        os.remove(filename)
+    # Clean up the original temporary file
+    if os.path.exists(temp_file_path):
+        os.remove(temp_file_path)
